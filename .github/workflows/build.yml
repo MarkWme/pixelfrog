@@ -13,8 +13,9 @@ permissions:
 env:
   JFROG_BUILD_NAME: pixelfrog
   PYTHON_VERSION: "3.11"
-  # Conan remote + conan art:build-info repo probe (must match your Artifactory virtual key).
+  # Conan virtual = resolve/install; local = upload (virtual uploads need default deploy repo in Artifactory UI).
   CONAN_VIRTUAL_REPO_KEY: ${{ vars.JF_CONAN_VIRTUAL_REPO || 'mwpf-conan-virtual-dev' }}
+  CONAN_LOCAL_REPO_KEY: ${{ vars.JF_CONAN_LOCAL_REPO || 'mwpf-conan-local-dev' }}
 
 jobs:
   setup:
@@ -297,6 +298,9 @@ jobs:
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
+          CONAN_LOCAL_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_LOCAL_REPO_KEY}"
+          conan remote add jfrog-conan-deploy "$CONAN_LOCAL_URL" --force
+          conan remote login jfrog-conan-deploy "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Collect Conan for Build Info (jf conan)
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
@@ -311,8 +315,7 @@ jobs:
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
             "${EXTRA[@]}"
-      # conan art:build-info upload sets properties on each artifact path; Artifactory rejects that on VIRTUAL
-      # repos ("not a local repository"). Use jf conan upload → local (via virtual default deploy) instead.
+      # Upload must target a LOCAL Conan repo API URL — virtual returns 400 without "default deployment repository".
       - name: Upload Conan cache to Artifactory (Xray / build SBOM)
         if: vars.JF_CONAN_PUBLISH_DEPS == 'true'
         env:
@@ -323,7 +326,7 @@ jobs:
           conan list "*:*" -c --format=json --out-file=staging/conan-upload-list.json
           EXTRA=( )
           if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
-          jf conan upload -l staging/conan-upload-list.json -r jfrog-conan --confirm \
+          jf conan upload -l staging/conan-upload-list.json -r jfrog-conan-deploy --confirm \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
             "${EXTRA[@]}"

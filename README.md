@@ -100,8 +100,9 @@ In GitHub: **Settings** → **Secrets and variables** → **Actions** → **Vari
 | `JF_URL`             | Platform URL, e.g. `https://acme.jfrog.io` (no trailing slash). |
 | `JF_OIDC_PROVIDER`   | **Provider name** from the JFrog OIDC integration (passed to `oidc-provider-name`). |
 | `JF_OIDC_AUDIENCE`   | OIDC **audience** for the GitHub ID token (must match what JFrog expects; often customized per integration). |
-| `JF_CONAN_VIRTUAL_REPO` | **Optional.** Artifactory **Conan virtual** repository key used for `conan remote`. Defaults to `mwpf-conan-virtual-dev` in the workflow. |
-| `JF_CONAN_PUBLISH_DEPS` | Set to **`true`** to run **`jf conan upload`** after **`jf conan install`**, pushing the current Conan cache (this job’s resolved packages) through your virtual remote so they land in the **default deploy repository** (usually a **local** Conan repo). Needed for strong **Xray / build SBOM** linkage to Conan binaries in Artifactory. Requires deploy permission on that repo. If unset or not `true`, only **`jf conan install --build-name`** runs (Build Info still publishes, but Conan artifacts may only exist in the remote cache until you upload). |
+| `JF_CONAN_VIRTUAL_REPO` | **Optional.** Artifactory **Conan virtual** repository key used for **`jf conan install`** / resolution. Defaults to `mwpf-conan-virtual-dev`. |
+| `JF_CONAN_LOCAL_REPO` | **Optional.** Artifactory **Conan local** repository key used for **`jf conan upload`** (`…/api/conan/<this-key>`). Defaults to `mwpf-conan-local-dev`. Uploads **cannot** use the virtual URL unless you configure a **default deployment repository** on that virtual in Artifactory (Administration → Repositories → virtual → Default Deployment Repository). |
+| `JF_CONAN_PUBLISH_DEPS` | Set to **`true`** to run **`jf conan upload`** after **`jf conan install`**, using remote **`jfrog-conan-deploy`** (local API URL above). Needed for strong **Xray / build SBOM** linkage. Requires **deploy** permission on the **local** Conan repo. |
 
 The workflow requests `permissions: id-token: write` and passes `JF_URL` plus the two OIDC inputs to `jfrog/setup-jfrog-cli@v4`. The action exchanges the GitHub OIDC token for a JFrog access token, configures the CLI, and exposes **`oidc-user`** / **`oidc-token`** step outputs for `conan remote login`.
 
@@ -188,7 +189,7 @@ GitHub Actions runs each **job** on a **new VM**. JFrog CLI keeps pending Build 
 This workflow therefore:
 
 1. Runs **`jf conan install … --build-name` / `--build-number`** in **`package-binary`** (same job as **`jf rt build-publish`**) so Conan resolution is recorded on the runner that publishes.
-2. Optionally, when **`JF_CONAN_PUBLISH_DEPS`** is **`true`**, runs **`conan list "*:*" -c`** to snapshot the job’s Conan cache and **`jf conan upload -l … -r jfrog-conan`** with the same build name/number. That matches JFrog’s recommended path: **store Conan packages in Artifactory**, then let **Xray** use **`conanmanifest.txt` / `conaninfo.txt`** for indexing and SBOM. Uploads through a **virtual** Conan repo are routed to your **local** deploy target; you cannot use **`conan art:build-info upload`** against **virtual** repository paths — Artifactory returns **“not a local repository”** when the Conan extension tries to **`set_properties`** on those URLs (even if **`create`** resolved manifests via the virtual).
+2. Optionally, when **`JF_CONAN_PUBLISH_DEPS`** is **`true`**, runs **`conan list "*:*" -c`** and **`jf conan upload -l … -r jfrog-conan-deploy`**. **`jfrog-conan-deploy`** points at your **local** Conan repo (`JF_CONAN_LOCAL_REPO`), because Artifactory returns **400** if you upload to a **virtual** Conan repo without a **default deployment repository** set in the UI.
 3. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
 4. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package.
 
@@ -213,9 +214,10 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 
 ### Conan remote authentication failures
 
-- Re-run `conan remote login jfrog-conan <user> -p <token>`.
-- Confirm the virtual URL ends with `/api/conan/<repo-key>`.
-- Tokens need **permission** to read (and usually deploy, for CI) on Conan repositories.
+- Re-run `conan remote login jfrog-conan <user> -p <token>` (virtual, for install).
+- For **`JF_CONAN_PUBLISH_DEPS`**, CI also uses **`jfrog-conan-deploy`** (local repo URL); that identity needs **deploy** on the **local** Conan repository.
+- Confirm URLs end with `/api/conan/<repo-key>`.
+- **400: Unable to upload into a virtual Conan repository without default local deployment repository** — either set **Default Deployment Repository** on the virtual in Artifactory, or keep using **`jfrog-conan-deploy`** (workflow default) so uploads hit **`JF_CONAN_LOCAL_REPO`** directly.
 
 ### Missing packages on ConanCenter
 
@@ -226,7 +228,7 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 
 - Confirm **`package-binary`** completed and **`jf rt build-publish`** ran with **`--collect-git-info`** / **`--collect-env`** (see workflow).
 - Ensure **the same `build-name` and `build-number`** are used for `jf conan install` (fallback path), **`conan art:build-info`** (when enabled), and uploads before publish.
-- For **Xray build SBOM** and Conan binaries tied to the build, set **`JF_CONAN_PUBLISH_DEPS`** to **`true`** and ensure the identity used in CI may **deploy** to the Conan repo your virtual uses as default deployment. If upload fails with **403**, fix permissions or leave the variable unset (install-only Build Info still runs).
+- For **Xray build SBOM** and Conan binaries tied to the build, set **`JF_CONAN_PUBLISH_DEPS`** to **`true`**, set **`JF_CONAN_LOCAL_REPO`** if your local key is not `mwpf-conan-local-dev`, and ensure CI may **deploy** to that **local** repo. If upload fails with **403**, fix permissions or leave **`JF_CONAN_PUBLISH_DEPS`** unset (install-only Build Info still runs).
 - If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts
