@@ -100,6 +100,8 @@ In GitHub: **Settings** → **Secrets and variables** → **Actions** → **Vari
 | `JF_URL`             | Platform URL, e.g. `https://acme.jfrog.io` (no trailing slash). |
 | `JF_OIDC_PROVIDER`   | **Provider name** from the JFrog OIDC integration (passed to `oidc-provider-name`). |
 | `JF_OIDC_AUDIENCE`   | OIDC **audience** for the GitHub ID token (must match what JFrog expects; often customized per integration). |
+| `JF_CONAN_ART_LOCAL_REPO` | **Optional.** Artifactory **Conan local** repository key used by **`conan art:build-info create`** (from [conan-io/conan-extensions](https://github.com/conan-io/conan-extensions) `art` commands). Enables Xray-friendly Conan module lists similar to [conan-sbom-generation-demo](https://github.com/sureshvenkatesan1/conan-sbom-generation-demo) and [ps-jfrog/conan-hello-world](https://github.com/ps-jfrog/conan-hello-world/blob/main/.github/workflows/jf-cli.yml). If unset, CI falls back to **`jf conan install --build-name`**. See [Conan 2 — JFrog / Build Info](https://docs.conan.io/2/integrations/jfrog.html). |
+| `JF_CONAN_ART_REPO_EXTRA` | **Optional.** Space-separated extra Conan repo keys passed **after** the local repo so Artifactory can resolve artifacts in order (often your **virtual** Conan repo as a fallback). |
 
 The workflow requests `permissions: id-token: write` and passes `JF_URL` plus the two OIDC inputs to `jfrog/setup-jfrog-cli@v4`. The action exchanges the GitHub OIDC token for a JFrog access token, configures the CLI, and exposes **`oidc-user`** / **`oidc-token`** step outputs for `conan remote login`.
 
@@ -185,12 +187,15 @@ GitHub Actions runs each **job** on a **new VM**. JFrog CLI keeps pending Build 
 
 This workflow therefore:
 
-1. Runs **`jf conan install … --build-name` / `--build-number` again in `package-binary`** so Conan resolution is recorded in the **same** job as `build-publish`.
-2. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
-3. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package. Dependencies should come from **`jf conan install` + Build Info**, not from the JSON file path.
-4. Optionally uploads a **CycloneDX** file from **`jf audit --format=cyclonedx --sbom --sca`** when your tenant supports it (Advanced Security / audit may be required; the step is best-effort).
+1. In **`package-binary`**, when **`JF_CONAN_ART_LOCAL_REPO`** is set, installs the Conan **`art`** extension ([conan-extensions](https://github.com/conan-io/conan-extensions)), registers Artifactory with **`conan art:server add`**, runs **`conan install … --format=json`**, then **`conan art:build-info create … --with-dependencies --add-cached-deps`** and **`conan art:build-info upload`** (same pattern as the [Conan JFrog integration doc](https://docs.conan.io/2/integrations/jfrog.html) and public demos). That path produces Build Info whose **dependency modules** line up with Conan packages for Xray SBOM-style views. **`JF_CONAN_ART_REPO_EXTRA`** can list additional repo keys (e.g. virtual) searched **after** the local repo.
+2. If **`JF_CONAN_ART_LOCAL_REPO`** is unset, falls back to **`jf conan install … --build-name` / `--build-number`** in **`package-binary`** so Conan resolution is still tied to the same job as publish.
+3. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
+4. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package.
+5. Optionally uploads a **CycloneDX** file from **`jf audit --format=cyclonedx --sbom --sca`** when your tenant supports it (Advanced Security / audit may be required; the step is best-effort).
 
-Optional repository variable **`JF_PROJECT_KEY`**: when set, it is passed as **`--project`** on `build-publish` so Build Info lands under the right Artifactory project.
+Optional repository variable **`JF_PROJECT_KEY`**: when set, it is passed as **`--project`** on **`build-publish`** and on **`conan art:build-info upload`** so Build Info lands under the right Artifactory project.
+
+If you use both **`conan art:build-info upload`** and **`jf rt build-publish`** with the same build name and number, Artifactory usually **merges** module data; if your platform version behaves differently, publish only one path or use **`conan art:build-info append`** (see extension [readme](https://github.com/conan-io/conan-extensions/blob/main/extensions/commands/art/readme_build_info.md)).
 
 ---
 
@@ -219,7 +224,8 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 ### Build Info missing Git / environment / Conan deps
 
 - Confirm **`package-binary`** completed and **`jf rt build-publish`** ran with **`--collect-git-info`** / **`--collect-env`** (see workflow).
-- Ensure **the same `build-name` and `build-number`** are used for `jf conan install` and uploads before publish.
+- Ensure **the same `build-name` and `build-number`** are used for `jf conan install` (fallback path), **`conan art:build-info`** (when enabled), and uploads before publish.
+- For richer **Conan** rows in Build Info / Xray, set **`JF_CONAN_ART_LOCAL_REPO`** to your **local** Conan repository key (not only the virtual used for `conan remote`). Optionally add **`JF_CONAN_ART_REPO_EXTRA`** with your virtual key so artifact lookup can fall back.
 - If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts

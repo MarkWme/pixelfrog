@@ -82,8 +82,8 @@ jobs:
             -s build_type=Release --build=missing \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}"
-      # Conan dependencies for Build Info come from `jf conan install --build-name` (above and in package-binary).
-      # Do not use `build-add-dependencies` on graph-info.json — Xray treats that as a single file, not each Conan package.
+      # Conan deps in Build Info: prefer `conan art:build-info` in package-binary when JF_CONAN_ART_LOCAL_REPO is set;
+      # otherwise `jf conan install --build-name` (package-binary). Do not use build-add-dependencies on graph-info.json.
 
   build:
     name: build
@@ -295,16 +295,54 @@ jobs:
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
-      - name: Refresh Conan deps into Build Info (same job as publish)
+      - name: Conan graph JSON + optional Art Build Info (conan-extensions art)
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
+          JF_URL: ${{ vars.JF_URL }}
+          JF_CONAN_ART_LOCAL_REPO: ${{ vars.JF_CONAN_ART_LOCAL_REPO }}
+          JF_CONAN_ART_REPO_EXTRA: ${{ vars.JF_CONAN_ART_REPO_EXTRA }}
+          JF_PROJECT_KEY: ${{ vars.JF_PROJECT_KEY }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p staging
-          jf conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing \
-            --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+          if [ -n "${JF_CONAN_ART_LOCAL_REPO:-}" ]; then
+            conan config install https://github.com/conan-io/conan-extensions.git \
+              -sf=extensions/commands/art -tf=extensions/commands/art
+            conan art:server remove pixelfrog-art 2>/dev/null || true
+            ART_BASE="${JF_URL%/}/artifactory"
+            conan art:server add pixelfrog-art "${ART_BASE}" \
+              --user="${OIDC_USER}" --token="${OIDC_TOKEN}"
+            conan install . --profile:build=default --profile:host=default \
+              -s build_type=Release --build=missing -r jfrog-conan \
+              --format=json > conan-install.json
+            REPOS=( "${JF_CONAN_ART_LOCAL_REPO}" )
+            if [ -n "${JF_CONAN_ART_REPO_EXTRA:-}" ]; then
+              for r in ${JF_CONAN_ART_REPO_EXTRA}; do REPOS+=( "$r" ); done
+            fi
+            conan art:build-info create conan-install.json \
+              "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" \
+              "${REPOS[@]}" \
+              --server pixelfrog-art \
+              --with-dependencies \
+              --add-cached-deps \
+              --build-url="${BUILD_URL}" \
+              > staging/pixelfrog-conan-buildinfo.json
+            UPLOAD_ARGS=( --server pixelfrog-art )
+            if [ -n "${JF_PROJECT_KEY:-}" ]; then
+              UPLOAD_ARGS+=( --project="${JF_PROJECT_KEY}" )
+            fi
+            UPLOAD_ARGS+=( staging/pixelfrog-conan-buildinfo.json )
+            conan art:build-info upload "${UPLOAD_ARGS[@]}"
+          else
+            echo "::notice::JF_CONAN_ART_LOCAL_REPO unset — using jf conan install for Build Info Conan modules. Set the variable to your Conan LOCAL repo key for conan art:build-info (see README)."
+            jf conan install . --profile:build=default --profile:host=default \
+              -s build_type=Release --build=missing \
+              --build-name="${{ env.JFROG_BUILD_NAME }}" \
+              --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+          fi
       - name: CycloneDX SBOM (full SCA component list for Xray / demos)
         continue-on-error: true
         run: |
