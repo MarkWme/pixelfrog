@@ -13,7 +13,6 @@ permissions:
 env:
   JFROG_BUILD_NAME: pixelfrog
   PYTHON_VERSION: "3.11"
-  JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
 
 jobs:
   setup:
@@ -30,6 +29,7 @@ jobs:
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
@@ -56,12 +56,14 @@ jobs:
         id: jfrog
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
           OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
           OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
@@ -105,12 +107,14 @@ jobs:
         id: jfrog
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
           OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
           OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
@@ -165,12 +169,14 @@ jobs:
         id: jfrog
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
           OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
           OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
@@ -230,12 +236,14 @@ jobs:
         id: jfrog
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
           OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
           OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
@@ -285,12 +293,14 @@ jobs:
         id: jfrog
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
           OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
           OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
@@ -342,6 +352,7 @@ jobs:
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: ${{ vars.JF_URL }}
+          JF_PROJECT: ${{ vars.JF_PROJECT_KEY}}
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
