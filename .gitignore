@@ -1,0 +1,6 @@
+build/
+CMakeUserPresets.json
+.DS_Store
+*.swp
+__pycache__/
+*.pyc

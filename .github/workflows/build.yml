@@ -1,0 +1,365 @@
+name: build
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  JFROG_BUILD_NAME: pixelfrog
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  setup:
+    name: setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog CLI and verify
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan --version
+
+  resolve-dependencies:
+    name: resolve-dependencies
+    needs: [setup]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog & Conan
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan profile detect --force
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
+          U="${JF_CONAN_USER:-admin}"
+          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+      - name: Resolve Conan dependencies (Artifactory → ConanCenter)
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          jf conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+      - name: Attach dependency graph file to build info
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          conan graph info . -s build_type=Release --format=json > graph-info.json
+          jf rt build-add-dependencies "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" graph-info.json
+
+  build:
+    name: build
+    needs: [resolve-dependencies]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog & Conan
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan profile detect --force
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
+          U="${JF_CONAN_USER:-admin}"
+          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+      - name: Install Conan deps and collect build info
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          jf conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+      - name: Collect environment metadata
+        env:
+          JFROG_BUILD_NAME: pixelfrog
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          jf rt build-collect-env "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}"
+      - name: Configure & build (CMake preset conan-release)
+        run: |
+          set -euo pipefail
+          cmake --version
+          cmake --preset conan-release
+          cmake --build --preset conan-release
+      - name: Upload pixelfrog binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixelfrog-binary
+          path: build/Release/pixelfrog
+
+  test:
+    name: test
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog & Conan
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan profile detect --force
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
+          U="${JF_CONAN_USER:-admin}"
+          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+      - name: Install deps & build tests
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          jf conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+          cmake --preset conan-release
+          cmake --build --preset conan-release
+      - name: Run tests (JUnit XML)
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          ./build/Release/pixelfrog_tests -r JUnit::out=test-results/pixelfrog-tests.xml
+      - name: Record test dependency graph
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          conan graph info . -s build_type=Release --format=json > graph-info-tests.json
+          jf rt build-add-dependencies "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" graph-info-tests.json
+      - name: Upload JUnit
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-xml
+          path: test-results/pixelfrog-tests.xml
+
+  security-scan:
+    name: security-scan
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog & Conan
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan profile detect --force
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
+          U="${JF_CONAN_USER:-admin}"
+          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+      - name: Prepare workspace for scan
+        run: |
+          set -euo pipefail
+          conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing
+      - name: Xray scan workspace (SCA)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p sarif
+          jf scan . --format sarif --fail=false --recursive > sarif/pixelfrog-xray.sarif
+      - name: Audit conanfile / sources
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          jf audit --fail=false --format table || true
+      - name: Upload SARIF to GitHub Advanced Security
+        if: hashFiles('sarif/pixelfrog-xray.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif/pixelfrog-xray.sarif
+
+  package-binary:
+    name: package-binary
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install Conan
+        run: pip install "conan~=2.0"
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog & Conan
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+          conan profile detect --force
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
+          U="${JF_CONAN_USER:-admin}"
+          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+      - name: Generate manifest & layout
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          conan graph info . -s build_type=Release --format=json > graph-info.json
+          python3 scripts/ci_write_manifest.py staging/manifest.json
+      - name: Download built binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pixelfrog-binary
+          path: staging
+      - name: Upload generic artifacts & publish build info
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          chmod +x staging/pixelfrog || true
+          jf rt upload "staging/pixelfrog" \
+            "pixelfrog-generic-local/pixelfrog/${{ github.run_number }}/pixelfrog" \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+          jf rt upload "staging/manifest.json" \
+            "pixelfrog-generic-local/pixelfrog/${{ github.run_number }}/manifest.json" \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+          jf rt build-publish "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}"
+
+  release-bundle:
+    name: release-bundle
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [package-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Configure JFrog CLI
+        env:
+          JF_URL: ${{ secrets.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
+            --interactive=false --overwrite=true
+          jf rt ping
+      - name: Create & promote Release Bundle v2
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          RB_VER="1.0.${{ github.run_number }}"
+          jf release-bundle-create pixelfrog-rb "${RB_VER}" \
+            --sync=true \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            || echo "release-bundle-create skipped or failed (configure Distribution / Release Lifecycle in SaaS)"
+          jf release-bundle-promote pixelfrog-rb "${RB_VER}" staging \
+            --promotion-type=copy --sync=true \
+            || echo "release-bundle-promote skipped (create environment 'staging' in JFrog)"
