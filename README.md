@@ -100,18 +100,19 @@ In GitHub: **Settings** → **Secrets and variables** → **Actions** → **Vari
 | `JF_URL`             | Platform URL, e.g. `https://acme.jfrog.io` (no trailing slash). |
 | `JF_OIDC_PROVIDER`   | **Provider name** from the JFrog OIDC integration (passed to `oidc-provider-name`). |
 | `JF_OIDC_AUDIENCE`   | OIDC **audience** for the GitHub ID token (must match what JFrog expects; often customized per integration). |
-| `JF_CONAN_ART_LOCAL_REPO` | **Optional.** Artifactory **Conan local** repository key used by **`conan art:build-info create`** (from [conan-io/conan-extensions](https://github.com/conan-io/conan-extensions) `art` commands). Enables Xray-friendly Conan module lists similar to [conan-sbom-generation-demo](https://github.com/sureshvenkatesan1/conan-sbom-generation-demo) and [ps-jfrog/conan-hello-world](https://github.com/ps-jfrog/conan-hello-world/blob/main/.github/workflows/jf-cli.yml). If unset, CI falls back to **`jf conan install --build-name`**. See [Conan 2 — JFrog / Build Info](https://docs.conan.io/2/integrations/jfrog.html). |
-| `JF_CONAN_ART_REPO_EXTRA` | **Optional.** Space-separated extra Conan repo keys passed **after** the local repo so Artifactory can resolve artifacts in order (often your **virtual** Conan repo as a fallback). |
+| `JF_CONAN_VIRTUAL_REPO` | **Optional.** Artifactory **Conan virtual** repository key used for `conan remote` and as the **first** repo passed to **`conan art:build-info create`**. Defaults to `mwpf-conan-virtual-dev` in the workflow. |
+| `JF_CONAN_ART_LOCAL_REPO` | **Optional.** Artifactory **Conan local** repository key passed to **`conan art:build-info create`** (from [conan-io/conan-extensions](https://github.com/conan-io/conan-extensions) `art` commands). Enables Xray-friendly Conan module lists similar to [conan-sbom-generation-demo](https://github.com/sureshvenkatesan1/conan-sbom-generation-demo) and [ps-jfrog/conan-hello-world](https://github.com/ps-jfrog/conan-hello-world/blob/main/.github/workflows/jf-cli.yml). If unset, CI falls back to **`jf conan install --build-name`**. See [Conan 2 — JFrog / Build Info](https://docs.conan.io/2/integrations/jfrog.html). |
+| `JF_CONAN_ART_REPO_EXTRA` | **Optional.** Space-separated extra Conan repo keys appended **after** virtual + local (deduplicated). Use if you need another repo (e.g. a dedicated **remote** cache key) for `conanmanifest.txt` lookup. |
 
 The workflow requests `permissions: id-token: write` and passes `JF_URL` plus the two OIDC inputs to `jfrog/setup-jfrog-cli@v4`. The action exchanges the GitHub OIDC token for a JFrog access token, configures the CLI, and exposes **`oidc-user`** / **`oidc-token`** step outputs for `conan remote login`.
 
 ### 3.3 Conan remote URL
 
-The workflow derives the Conan client remote as:
+The workflow sets the Conan API URL to:
 
-`${JF_URL}/artifactory/api/conan/conan-virtual`
+`${JF_URL}/artifactory/api/conan/<virtual-key>`
 
-If your virtual repository key is **not** `conan-virtual`, change that path segment in [`.github/workflows/build.yml`](.github/workflows/build.yml).
+where **`<virtual-key>`** is **`JF_CONAN_VIRTUAL_REPO`**, or `mwpf-conan-virtual-dev` if that variable is unset (see top-level `env` in [`.github/workflows/build.yml`](.github/workflows/build.yml)).
 
 ### 3.4 Optional: token-based auth instead of OIDC
 
@@ -187,7 +188,7 @@ GitHub Actions runs each **job** on a **new VM**. JFrog CLI keeps pending Build 
 
 This workflow therefore:
 
-1. In **`package-binary`**, when **`JF_CONAN_ART_LOCAL_REPO`** is set, installs the Conan **`art`** extension ([conan-extensions](https://github.com/conan-io/conan-extensions)), registers Artifactory with **`conan art:server add`**, runs **`conan install … --format=json`**, then **`conan art:build-info create … --with-dependencies --add-cached-deps`** and **`conan art:build-info upload`** (same pattern as the [Conan JFrog integration doc](https://docs.conan.io/2/integrations/jfrog.html) and public demos). That path produces Build Info whose **dependency modules** line up with Conan packages for Xray SBOM-style views. **`JF_CONAN_ART_REPO_EXTRA`** can list additional repo keys (e.g. virtual) searched **after** the local repo.
+1. In **`package-binary`**, when **`JF_CONAN_ART_LOCAL_REPO`** is set, installs the Conan **`art`** extension ([conan-extensions](https://github.com/conan-io/conan-extensions)), registers Artifactory with **`conan art:server add`**, runs **`conan install … --format=json`**, then **`conan art:build-info create … --with-dependencies --add-cached-deps`** and **`conan art:build-info upload`** (same pattern as the [Conan JFrog integration doc](https://docs.conan.io/2/integrations/jfrog.html) and public demos). The workflow passes **two** repository keys to **`create`**: your **virtual** (`JF_CONAN_VIRTUAL_REPO` / default) **first**, then the **local** repo. That matters because [conan-extensions](https://github.com/conan-io/conan-extensions/blob/main/extensions/commands/art/cmd_build_info.py) treats a **single** repository as the origin for **every** artifact (no `conanmanifest.txt` probe); dependencies resolved from ConanCenter via Artifactory usually live under the **virtual / remote cache**, not only the local repo — wrong paths cause **missing `.tgz`** warnings and **`set_properties` 400** on upload. **`JF_CONAN_ART_REPO_EXTRA`** adds more keys after those two (deduplicated).
 2. If **`JF_CONAN_ART_LOCAL_REPO`** is unset, falls back to **`jf conan install … --build-name` / `--build-number`** in **`package-binary`** so Conan resolution is still tied to the same job as publish.
 3. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
 4. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package.
@@ -225,7 +226,7 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 
 - Confirm **`package-binary`** completed and **`jf rt build-publish`** ran with **`--collect-git-info`** / **`--collect-env`** (see workflow).
 - Ensure **the same `build-name` and `build-number`** are used for `jf conan install` (fallback path), **`conan art:build-info`** (when enabled), and uploads before publish.
-- For richer **Conan** rows in Build Info / Xray, set **`JF_CONAN_ART_LOCAL_REPO`** to your **local** Conan repository key (not only the virtual used for `conan remote`). Optionally add **`JF_CONAN_ART_REPO_EXTRA`** with your virtual key so artifact lookup can fall back.
+- For richer **Conan** rows in Build Info / Xray, set **`JF_CONAN_ART_LOCAL_REPO`** to your **local** Conan repository key. The workflow already prepends your **virtual** repo to **`conan art:build-info create`** so cached dependencies (e.g. from ConanCenter) resolve to real paths in Artifactory. If **`set_properties` / 400** or **missing `.tgz`** persist, add your **Conan remote** (cache) repo key via **`JF_CONAN_ART_REPO_EXTRA`** — some tenants need that for `api/storage/.../conanmanifest.txt` on non-virtual repos.
 - If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts

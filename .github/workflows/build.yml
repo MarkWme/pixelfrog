@@ -13,6 +13,8 @@ permissions:
 env:
   JFROG_BUILD_NAME: pixelfrog
   PYTHON_VERSION: "3.11"
+  # Conan remote + conan art:build-info repo probe (must match your Artifactory virtual key).
+  CONAN_VIRTUAL_REPO_KEY: ${{ vars.JF_CONAN_VIRTUAL_REPO || 'mwpf-conan-virtual-dev' }}
 
 jobs:
   setup:
@@ -70,7 +72,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Resolve Conan dependencies (Artifactory → ConanCenter)
@@ -116,7 +118,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install Conan deps and collect build info
@@ -172,7 +174,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install deps & build tests
@@ -233,7 +235,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Prepare workspace for scan
@@ -292,7 +294,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Conan graph JSON + optional Art Build Info (conan-extensions art)
@@ -318,9 +320,18 @@ jobs:
             conan install . --profile:build=default --profile:host=default \
               -s build_type=Release --build=missing -r jfrog-conan \
               --format=json > conan-install.json
-            REPOS=( "${JF_CONAN_ART_LOCAL_REPO}" )
+            # conan-extensions: with a SINGLE repository, every artifact is assumed to live there (no manifest
+            # probe). Dependencies pulled via the virtual repo usually live under virtual/remote cache, not
+            # only the local repo — prepend virtual first so _get_origin_repo finds conanmanifest.txt.
+            REPOS=( "${CONAN_VIRTUAL_REPO_KEY}" "${JF_CONAN_ART_LOCAL_REPO}" )
             if [ -n "${JF_CONAN_ART_REPO_EXTRA:-}" ]; then
-              for r in ${JF_CONAN_ART_REPO_EXTRA}; do REPOS+=( "$r" ); done
+              for r in ${JF_CONAN_ART_REPO_EXTRA}; do
+                dup=0
+                for existing in "${REPOS[@]}"; do
+                  [ "$r" = "$existing" ] && dup=1 && break
+                done
+                [ "$dup" -eq 0 ] && REPOS+=( "$r" )
+              done
             fi
             conan art:build-info create conan-install.json \
               "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" \
