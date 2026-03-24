@@ -77,16 +77,12 @@ jobs:
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Resolve Conan dependencies (Artifactory → ConanCenter)
-        env:
-          JFROG_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           jf conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing \
-            --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
-      # Conan deps for Build Info: `jf conan install --build-name` in package-binary (+ optional `jf conan upload`).
-      # Do not use `jf rt build-add-dependencies` on graph-info.json — Xray treats that as one generic file.
+            -s build_type=Release --build=missing -r jfrog-conan
+      # Build Info is published only from package-binary (`jf conan install --build-name` there). Always pass
+      # `-r jfrog-conan` so resolution (and Build Info modules) point at Artifactory, not ConanCenter directly.
 
   build:
     name: build
@@ -122,15 +118,11 @@ jobs:
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
-      - name: Install Conan deps and collect build info
-        env:
-          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+      - name: Install Conan deps (Artifactory)
         run: |
           set -euo pipefail
           jf conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing \
-            --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+            -s build_type=Release --build=missing -r jfrog-conan
       # Git + CI environment are attached at `jf rt build-publish` in package-binary (--collect-git-info / --collect-env).
       - name: Configure & build (CMake preset conan-release)
         run: |
@@ -179,14 +171,10 @@ jobs:
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install deps & build tests
-        env:
-          JFROG_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           jf conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing \
-            --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+            -s build_type=Release --build=missing -r jfrog-conan
           cmake --preset conan-release
           cmake --build --preset conan-release
       - name: Run tests (JUnit XML)
@@ -243,7 +231,7 @@ jobs:
         run: |
           set -euo pipefail
           conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing
+            -s build_type=Release --build=missing -r jfrog-conan
       - name: Xray scan workspace (SCA)
         continue-on-error: true
         run: |
@@ -310,10 +298,13 @@ jobs:
           mkdir -p staging
           EXTRA=( )
           if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
+          # -r jfrog-conan is required: without it, Conan may use conancenter first and Build Info / Xray only see
+          # generic uploads → one-component SBOM and "Partial" scan (artifacts not in your indexed repos).
           jf conan install . --profile:build=default --profile:host=default \
-            -s build_type=Release --build=missing \
+            -s build_type=Release --build=missing -r jfrog-conan \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            --module=conan \
             "${EXTRA[@]}"
       # Upload must target a LOCAL Conan repo API URL — virtual returns 400 without "default deployment repository".
       - name: Upload Conan cache to Artifactory (Xray / build SBOM)
@@ -348,7 +339,7 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          conan graph info . -s build_type=Release --format=json > graph-info.json
+          conan graph info . -r jfrog-conan -s build_type=Release --format=json > graph-info.json
           python3 scripts/ci_write_manifest.py staging/manifest.json
       - name: Download built binary
         uses: actions/download-artifact@v4

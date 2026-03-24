@@ -188,7 +188,7 @@ GitHub Actions runs each **job** on a **new VM**. JFrog CLI keeps pending Build 
 
 This workflow therefore:
 
-1. Runs **`jf conan install … --build-name` / `--build-number`** in **`package-binary`** (same job as **`jf rt build-publish`**) so Conan resolution is recorded on the runner that publishes.
+1. Runs **`jf conan install … -r jfrog-conan --build-name` / `--build-number` / `--module=conan`** in **`package-binary`** (same job as **`jf rt build-publish`**). **`-r jfrog-conan` is mandatory**: if Conan resolves against **ConanCenter** (often the default first remote), Build Info and Xray mostly see only the **generic** uploads (binary + manifest) — the SBOM collapses to **one component** and Xray may show **Partial** because dependency artifacts are not in your indexed Artifactory repos. Earlier jobs use the same **`-r jfrog-conan`** for install only (no `--build-name`; they do not publish Build Info).
 2. Optionally, when **`JF_CONAN_PUBLISH_DEPS`** is **`true`**, runs **`conan list "*:*" -c`** and **`jf conan upload -l … -r jfrog-conan-deploy`**. **`jfrog-conan-deploy`** points at your **local** Conan repo (`JF_CONAN_LOCAL_REPO`), because Artifactory returns **400** if you upload to a **virtual** Conan repo without a **default deployment repository** set in the UI.
 3. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
 4. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package.
@@ -227,8 +227,9 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 ### Build Info missing Git / environment / Conan deps
 
 - Confirm **`package-binary`** completed and **`jf rt build-publish`** ran with **`--collect-git-info`** / **`--collect-env`** (see workflow).
-- Ensure **the same `build-name` and `build-number`** are used for `jf conan install` (fallback path), **`conan art:build-info`** (when enabled), and uploads before publish.
-- For **Xray build SBOM** and Conan binaries tied to the build, set **`JF_CONAN_PUBLISH_DEPS`** to **`true`**, set **`JF_CONAN_LOCAL_REPO`** if your local key is not `mwpf-conan-local-dev`, and ensure CI may **deploy** to that **local** repo. If upload fails with **403**, fix permissions or leave **`JF_CONAN_PUBLISH_DEPS`** unset (install-only Build Info still runs).
+- **SBOM shows only one component / Xray “Partial” on the build:** almost always means Conan resolved **outside** Artifactory (e.g. **conancenter** remote first). The workflow forces **`-r jfrog-conan`** on every **`jf conan install`** / **`conan install`** so Build Info Conan modules reference your **virtual → remote cache / local** layout. Re-run after pulling the latest workflow; in **Administration → Xray → Indexed Resources**, include your **Conan local**, **Conan remote** (if used), **generic local**, and the **virtual** you browse through.
+- **“Partial”** can also appear until Xray finishes asynchronous indexing — refresh the build after a few minutes.
+- For **strong binary linkage**, set **`JF_CONAN_PUBLISH_DEPS`** to **`true`**, set **`JF_CONAN_LOCAL_REPO`** if needed, and grant **deploy** on that **local** Conan repo.
 - If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts
