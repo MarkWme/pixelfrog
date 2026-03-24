@@ -6,6 +6,10 @@ name: build
   pull_request:
     branches: [main]
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   JFROG_BUILD_NAME: pixelfrog
   PYTHON_VERSION: "3.11"
@@ -21,19 +25,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog CLI and verify
-        env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Verify JFrog and Conan
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan --version
 
@@ -49,26 +50,26 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog & Conan
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Configure Conan remote
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan profile detect --force
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
-          U="${JF_CONAN_USER:-admin}"
-          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+          conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Resolve Conan dependencies (Artifactory → ConanCenter)
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
@@ -98,26 +99,26 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog & Conan
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Configure Conan remote
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan profile detect --force
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
-          U="${JF_CONAN_USER:-admin}"
-          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+          conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install Conan deps and collect build info
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
@@ -158,26 +159,26 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog & Conan
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Configure Conan remote
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan profile detect --force
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
-          U="${JF_CONAN_USER:-admin}"
-          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+          conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install deps & build tests
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
@@ -212,6 +213,7 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       security-events: write
       contents: read
     steps:
@@ -222,26 +224,26 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog & Conan
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Configure Conan remote
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan profile detect --force
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
-          U="${JF_CONAN_USER:-admin}"
-          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+          conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Prepare workspace for scan
         run: |
           set -euo pipefail
@@ -277,26 +279,26 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install Conan
         run: pip install "conan~=2.0"
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog & Conan
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Configure Conan remote
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          JF_CONAN_USER: ${{ secrets.JF_CONAN_USER }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
           conan profile detect --force
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
-          U="${JF_CONAN_USER:-admin}"
-          conan remote login jfrog-conan "$U" -p "${JF_ACCESS_TOKEN}"
+          conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Generate manifest & layout
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
@@ -335,19 +337,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install JFrog CLI
+      - name: Set up JFrog CLI (OIDC)
         uses: jfrog/setup-jfrog-cli@v4
         env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Configure JFrog CLI
-        env:
-          JF_URL: ${{ secrets.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          JF_URL: ${{ vars.JF_URL }}
+        with:
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
+          oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      - name: Verify JFrog
         run: |
           set -euo pipefail
-          jf config add saas --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" \
-            --interactive=false --overwrite=true
           jf rt ping
       - name: Create & promote Release Bundle v2
         env:

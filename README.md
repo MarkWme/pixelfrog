@@ -80,21 +80,38 @@ This highlights **dependencies + released binary** in one watch.
 
 ---
 
-## 3. GitHub Actions secrets (Section 5.2)
+## 3. GitHub Actions variables and OIDC (Section 5.2)
 
-In the GitHub repo: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+The workflow uses **OpenID Connect** with the [JFrog `setup-jfrog-cli` action](https://github.com/jfrog/setup-jfrog-cli) so you do **not** need a long-lived `JF_ACCESS_TOKEN` secret for CI.
 
-| Secret            | Purpose |
-|-------------------|--------|
-| `JF_URL`          | Platform URL, e.g. `https://acme.jfrog.io` (no trailing slash). |
-| `JF_ACCESS_TOKEN` | Access token with read/write to Conan + generic repos used in the workflow. |
-| `JF_CONAN_USER` *(optional)* | Username for `conan remote login` (defaults to `admin` if unset). |
+### 3.1 Configure trust in JFrog
+
+1. In the JFrog Platform, create an **OIDC integration** for GitHub Actions and an **identity mapping** that matches your repository (and branch/workflow if you lock it down). The **Provider name** you set in JFrog must match `JF_OIDC_PROVIDER` below.
+2. See [GitHub Docs: OpenID Connect in JFrog](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-jfrog) and [JFrog’s GitHub OIDC overview](https://jfrog.com/blog/secure-access-development-jfrog-github-oidc/).
+
+### 3.2 Repository variables
+
+In GitHub: **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**:
+
+| Variable             | Purpose |
+|----------------------|--------|
+| `JF_URL`             | Platform URL, e.g. `https://acme.jfrog.io` (no trailing slash). |
+| `JF_OIDC_PROVIDER`   | **Provider name** from the JFrog OIDC integration (passed to `oidc-provider-name`). |
+| `JF_OIDC_AUDIENCE`   | OIDC **audience** for the GitHub ID token (must match what JFrog expects; often customized per integration). |
+
+The workflow requests `permissions: id-token: write` and passes `JF_URL` plus the two OIDC inputs to `jfrog/setup-jfrog-cli@v4`. The action exchanges the GitHub OIDC token for a JFrog access token, configures the CLI, and exposes **`oidc-user`** / **`oidc-token`** step outputs for `conan remote login`.
+
+### 3.3 Conan remote URL
 
 The workflow derives the Conan client remote as:
 
 `${JF_URL}/artifactory/api/conan/conan-virtual`
 
-If your virtual repository key is **not** `conan-virtual`, fork the workflow and change that path segment.
+If your virtual repository key is **not** `conan-virtual`, change that path segment in [`.github/workflows/build.yml`](.github/workflows/build.yml).
+
+### 3.4 Optional: token-based auth instead of OIDC
+
+To use a static access token, replace the OIDC `with:` block on `setup-jfrog-cli` with `env: JF_URL` + `JF_ACCESS_TOKEN` from a secret and remove reliance on `steps.jfrog.outputs['oidc-token']` for Conan (use the same token in `conan remote login`). The upstream action documents this path in its README.
 
 ---
 
