@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Resolve Conan dependencies (Artifactory → ConanCenter)
@@ -116,7 +116,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install Conan deps and collect build info
@@ -176,7 +176,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Install deps & build tests
@@ -241,7 +241,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Prepare workspace for scan
@@ -296,7 +296,7 @@ jobs:
           set -euo pipefail
           jf rt ping
           conan profile detect --force
-          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/conan-virtual"
+          CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/mwpf-conan-virtual-dev"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
       - name: Generate manifest & layout
@@ -321,11 +321,11 @@ jobs:
           set -euo pipefail
           chmod +x staging/pixelfrog || true
           jf rt upload "staging/pixelfrog" \
-            "pixelfrog-generic-local/pixelfrog/${{ github.run_number }}/pixelfrog" \
+            "mwpf-generic-local/pixelfrog/${{ github.run_number }}/pixelfrog" \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}"
           jf rt upload "staging/manifest.json" \
-            "pixelfrog-generic-local/pixelfrog/${{ github.run_number }}/manifest.json" \
+            "mwpf-generic-local/pixelfrog/${{ github.run_number }}/manifest.json" \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}"
           jf rt build-publish "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}"
