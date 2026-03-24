@@ -84,8 +84,8 @@ jobs:
             -s build_type=Release --build=missing \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}"
-      # Conan deps in Build Info: prefer `conan art:build-info` in package-binary when JF_CONAN_ART_LOCAL_REPO is set;
-      # otherwise `jf conan install --build-name` (package-binary). Do not use build-add-dependencies on graph-info.json.
+      # Conan deps for Build Info: `jf conan install --build-name` in package-binary (+ optional `jf conan upload`).
+      # Do not use `jf rt build-add-dependencies` on graph-info.json — Xray treats that as one generic file.
 
   build:
     name: build
@@ -297,63 +297,36 @@ jobs:
           CONAN_REMOTE_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_VIRTUAL_REPO_KEY}"
           conan remote add jfrog-conan "$CONAN_REMOTE_URL" --force
           conan remote login jfrog-conan "${OIDC_USER}" -p "${OIDC_TOKEN}"
-      - name: Conan graph JSON + optional Art Build Info (conan-extensions art)
+      - name: Collect Conan for Build Info (jf conan)
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
-          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
-          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
-          JF_URL: ${{ vars.JF_URL }}
-          JF_CONAN_ART_LOCAL_REPO: ${{ vars.JF_CONAN_ART_LOCAL_REPO }}
-          JF_CONAN_ART_REPO_EXTRA: ${{ vars.JF_CONAN_ART_REPO_EXTRA }}
           JF_PROJECT_KEY: ${{ vars.JF_PROJECT_KEY }}
-          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p staging
-          if [ -n "${JF_CONAN_ART_LOCAL_REPO:-}" ]; then
-            conan config install https://github.com/conan-io/conan-extensions.git \
-              -sf=extensions/commands/art -tf=extensions/commands/art
-            conan art:server remove pixelfrog-art 2>/dev/null || true
-            ART_BASE="${JF_URL%/}/artifactory"
-            conan art:server add pixelfrog-art "${ART_BASE}" \
-              --user="${OIDC_USER}" --token="${OIDC_TOKEN}"
-            conan install . --profile:build=default --profile:host=default \
-              -s build_type=Release --build=missing -r jfrog-conan \
-              --format=json > conan-install.json
-            # conan-extensions: with a SINGLE repository, every artifact is assumed to live there (no manifest
-            # probe). Dependencies pulled via the virtual repo usually live under virtual/remote cache, not
-            # only the local repo — prepend virtual first so _get_origin_repo finds conanmanifest.txt.
-            REPOS=( "${CONAN_VIRTUAL_REPO_KEY}" "${JF_CONAN_ART_LOCAL_REPO}" )
-            if [ -n "${JF_CONAN_ART_REPO_EXTRA:-}" ]; then
-              for r in ${JF_CONAN_ART_REPO_EXTRA}; do
-                dup=0
-                for existing in "${REPOS[@]}"; do
-                  [ "$r" = "$existing" ] && dup=1 && break
-                done
-                [ "$dup" -eq 0 ] && REPOS+=( "$r" )
-              done
-            fi
-            conan art:build-info create conan-install.json \
-              "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" \
-              "${REPOS[@]}" \
-              --server pixelfrog-art \
-              --with-dependencies \
-              --add-cached-deps \
-              --build-url="${BUILD_URL}" \
-              > staging/pixelfrog-conan-buildinfo.json
-            UPLOAD_ARGS=( --server pixelfrog-art )
-            if [ -n "${JF_PROJECT_KEY:-}" ]; then
-              UPLOAD_ARGS+=( --project="${JF_PROJECT_KEY}" )
-            fi
-            UPLOAD_ARGS+=( staging/pixelfrog-conan-buildinfo.json )
-            conan art:build-info upload "${UPLOAD_ARGS[@]}"
-          else
-            echo "::notice::JF_CONAN_ART_LOCAL_REPO unset — using jf conan install for Build Info Conan modules. Set the variable to your Conan LOCAL repo key for conan art:build-info (see README)."
-            jf conan install . --profile:build=default --profile:host=default \
-              -s build_type=Release --build=missing \
-              --build-name="${{ env.JFROG_BUILD_NAME }}" \
-              --build-number="${{ env.JFROG_BUILD_NUMBER }}"
-          fi
+          EXTRA=( )
+          if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
+          jf conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            "${EXTRA[@]}"
+      # conan art:build-info upload sets properties on each artifact path; Artifactory rejects that on VIRTUAL
+      # repos ("not a local repository"). Use jf conan upload → local (via virtual default deploy) instead.
+      - name: Upload Conan cache to Artifactory (Xray / build SBOM)
+        if: vars.JF_CONAN_PUBLISH_DEPS == 'true'
+        env:
+          JFROG_BUILD_NUMBER: ${{ github.run_number }}
+          JF_PROJECT_KEY: ${{ vars.JF_PROJECT_KEY }}
+        run: |
+          set -euo pipefail
+          conan list "*:*" -c --format=json --out-file=staging/conan-upload-list.json
+          EXTRA=( )
+          if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
+          jf conan upload -l staging/conan-upload-list.json -r jfrog-conan --confirm \
+            --build-name="${{ env.JFROG_BUILD_NAME }}" \
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            "${EXTRA[@]}"
       - name: CycloneDX SBOM (full SCA component list for Xray / demos)
         continue-on-error: true
         run: |
