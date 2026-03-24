@@ -6,6 +6,7 @@ from conan.tools.cmake import CMakeDeps, CMakeToolchain, cmake_layout
 class PixelfrogConan(ConanFile):
     name = "pixelfrog"
     version = "1.0.0"
+    license = "GPL-3.0-or-later"
     settings = "os", "compiler", "build_type", "arch"
     options = {"demo_vuln_mode": [True, False]}
     default_options = {"demo_vuln_mode": False}

@@ -4,6 +4,8 @@ Command-line C++17 demo that loads JPEG/PNG, applies filters (greyscale, Gaussia
 
 **Time budget:** about 45–60 minutes for Artifactory + secrets + first green CI run, assuming a clean JFrog trial tenant.
 
+**License:** [GNU General Public License v3.0](LICENSE) (GPL-3.0). Copyleft is intentional so Xray licence rules (e.g. watches on `GPL-3.0`) have something to match in **this** repository—not only in third-party dependencies.
+
 ---
 
 ## Prerequisites (local macOS)
@@ -177,6 +179,19 @@ Seven jobs, matching the spec: **setup**, **resolve-dependencies**, **build**, *
 - **Release bundles** require Distribution / Release Lifecycle to be enabled; steps echo a hint if promotion is not configured.
 - **SARIF upload** runs when `jf scan` produces `sarif/pixelfrog-xray.sarif`; may be skipped if Advanced Security is not enabled on the repo.
 
+### Build Info: environment, Git, and Conan dependencies
+
+GitHub Actions runs each **job** on a **new VM**. JFrog CLI keeps pending Build Info on that machine until `jf rt build-publish`. Commands like `jf rt build-collect-env` in an **earlier** job do not carry over to the job that publishes.
+
+This workflow therefore:
+
+1. Runs **`jf conan install … --build-name` / `--build-number` again in `package-binary`** so Conan resolution is recorded in the **same** job as `build-publish`.
+2. Calls **`jf rt build-publish` with `--collect-env=true` and `--collect-git-info=true`** (and `--build-url` for the Actions run), so the published record includes CI environment variables and the Git revision from the checked-out repo (`fetch-depth: 0` on that checkout improves history for the UI).
+3. Avoids **`jf rt build-add-dependencies` on `graph-info.json`** — that attaches **one** generic file, which makes Xray’s SBOM-style views look like a **single** component instead of each Conan package. Dependencies should come from **`jf conan install` + Build Info**, not from the JSON file path.
+4. Optionally uploads a **CycloneDX** file from **`jf audit --format=cyclonedx --sbom --sca`** when your tenant supports it (Advanced Security / audit may be required; the step is best-effort).
+
+Optional repository variable **`JF_PROJECT_KEY`**: when set, it is passed as **`--project`** on `build-publish` so Build Info lands under the right Artifactory project.
+
 ---
 
 ## 8. Frogbot
@@ -200,6 +215,12 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 
 - Ensure the **remote** repository proxies ConanCenter and the **virtual** includes it.
 - First resolution may be slow; Artifactory caches packages under the remote cache.
+
+### Build Info missing Git / environment / Conan deps
+
+- Confirm **`package-binary`** completed and **`jf rt build-publish`** ran with **`--collect-git-info`** / **`--collect-env`** (see workflow).
+- Ensure **the same `build-name` and `build-number`** are used for `jf conan install` and uploads before publish.
+- If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts
 
@@ -228,4 +249,10 @@ ctest --output-on-failure
 
 ## Licence
 
-Demo / sample code — use and adapt for JFrog customer demos under your own policies.
+Copyright © contributors to PixelFrog.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or** (at your option) **any later version**.
+
+This program is distributed in the hope that it will be useful, but **without any warranty**; without even the implied warranty of **merchantability** or **fitness for a particular purpose**. See the [GNU General Public License v3.0](LICENSE) for full terms.
+
+For JFrog demos, publishing the app under GPL-3.0 helps show **licence detection** on your own source and artefacts alongside dependency graphs.
