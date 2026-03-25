@@ -81,8 +81,8 @@ jobs:
           set -euo pipefail
           jf conan install . --profile:build=default --profile:host=default \
             -s build_type=Release --build=missing -r jfrog-conan
-      # Build Info is published only from package-binary (`jf conan install --build-name` there). Always pass
-      # `-r jfrog-conan` so resolution (and Build Info modules) point at Artifactory, not ConanCenter directly.
+      # Build Info is published from package-binary (`jf conan` and/or `conan art:build-info` + `jf rt build-publish`).
+      # Always pass `-r jfrog-conan` so resolution points at Artifactory, not ConanCenter directly.
 
   build:
     name: build
@@ -275,7 +275,7 @@ jobs:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
       # setup-jfrog-cli sets JFROG_CLI_BUILD_NAME from GITHUB_WORKFLOW (.github/workflows/build.yml → "build").
-      # jf conan then records Conan modules under that name; jf rt build-publish pixelfrog only sees generic uploads.
+      # Override so conan art:build-info + jf rt build-publish use the same name (see JFrog Conan + Build Info docs).
       - name: Align JFrog CLI build name/number with publish (JFROG_BUILD_NAME)
         run: |
           {
@@ -298,37 +298,49 @@ jobs:
           CONAN_LOCAL_URL="${JF_URL%/}/artifactory/api/conan/${CONAN_LOCAL_REPO_KEY}"
           conan remote add jfrog-conan-deploy "$CONAN_LOCAL_URL" --force
           conan remote login jfrog-conan-deploy "${OIDC_USER}" -p "${OIDC_TOKEN}"
-      - name: Collect Conan for Build Info (jf conan)
+      # JFrog: Conan Build Info for Xray via conan art:build-info (local repo only for create/upload).
+      # https://docs.jfrog.com/artifactory/docs/conan-repositories — virtual for install, local for deploy.
+      - name: Conan deps + conan art:build-info
         env:
           JFROG_BUILD_NUMBER: ${{ github.run_number }}
           JF_PROJECT_KEY: ${{ vars.JF_PROJECT_KEY }}
+          JF_URL: ${{ vars.JF_URL }}
+          OIDC_USER: ${{ steps.jfrog.outputs['oidc-user'] }}
+          OIDC_TOKEN: ${{ steps.jfrog.outputs['oidc-token'] }}
+          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p staging
           EXTRA=( )
           if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
-          # -r jfrog-conan is required: without it, Conan may use conancenter first and Build Info / Xray only see
-          # generic uploads → one-component SBOM and "Partial" scan (artifacts not in your indexed repos).
           jf conan install . --profile:build=default --profile:host=default \
             -s build_type=Release --build=missing -r jfrog-conan \
-            --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
             "${EXTRA[@]}"
-      # Upload must target a LOCAL Conan repo API URL — virtual returns 400 without "default deployment repository".
-      - name: Upload Conan cache to Artifactory (Xray / build SBOM)
-        if: vars.JF_CONAN_PUBLISH_DEPS == 'true'
-        env:
-          JFROG_BUILD_NUMBER: ${{ github.run_number }}
-          JF_PROJECT_KEY: ${{ vars.JF_PROJECT_KEY }}
-        run: |
-          set -euo pipefail
           conan list "*:*" -c --format=json --out-file=staging/conan-upload-list.json
-          EXTRA=( )
-          if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
-          jf conan upload -l staging/conan-upload-list.json -r jfrog-conan-deploy --confirm \
+          jf conan upload -l staging/conan-upload-list.json -r jfrog-conan-deploy --confirm --force \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
             "${EXTRA[@]}"
+          conan config install https://github.com/conan-io/conan-extensions.git \
+            -sf=extensions/commands/art -tf=extensions/commands/art
+          conan art:server remove pixelfrog-art 2>/dev/null || true
+          conan art:server add pixelfrog-art "${JF_URL%/}/artifactory" \
+            --user="${OIDC_USER}" --token="${OIDC_TOKEN}"
+          conan install . --profile:build=default --profile:host=default \
+            -s build_type=Release --build=missing -r jfrog-conan \
+            --format=json > staging/conan-install.json
+          conan art:build-info create staging/conan-install.json \
+            "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" \
+            "${{ env.CONAN_LOCAL_REPO_KEY }}" \
+            --server pixelfrog-art \
+            --with-dependencies \
+            --add-cached-deps \
+            --build-url="${BUILD_URL}" \
+            > staging/pixelfrog-conan-buildinfo.json
+          UPLOAD=( --server pixelfrog-art )
+          if [ -n "${JF_PROJECT_KEY:-}" ]; then UPLOAD+=( --project="${JF_PROJECT_KEY}" ); fi
+          UPLOAD+=( staging/pixelfrog-conan-buildinfo.json )
+          conan art:build-info upload "${UPLOAD[@]}"
       - name: CycloneDX SBOM (full SCA component list for Xray / demos)
         continue-on-error: true
         run: |
@@ -362,19 +374,24 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x staging/pixelfrog || true
+          RT_EXTRA=( )
+          if [ -n "${JF_PROJECT_KEY:-}" ]; then RT_EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
           jf rt upload "staging/pixelfrog" \
             "mwpf-generic-local/pixelfrog/${{ github.run_number }}/pixelfrog" \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            "${RT_EXTRA[@]}"
           jf rt upload "staging/manifest.json" \
             "mwpf-generic-local/pixelfrog/${{ github.run_number }}/manifest.json" \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
-            --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+            --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+            "${RT_EXTRA[@]}"
           if [ -f staging/pixelfrog-sbom.cdx.json ]; then
             jf rt upload "staging/pixelfrog-sbom.cdx.json" \
               "mwpf-generic-local/pixelfrog/${{ github.run_number }}/pixelfrog-sbom.cdx.json" \
               --build-name="${{ env.JFROG_BUILD_NAME }}" \
-              --build-number="${{ env.JFROG_BUILD_NUMBER }}"
+              --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
+              "${RT_EXTRA[@]}"
           fi
           EXTRA=( )
           if [ -n "${JF_PROJECT_KEY:-}" ]; then EXTRA+=(--project="${JF_PROJECT_KEY}"); fi
