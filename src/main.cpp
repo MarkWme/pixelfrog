@@ -3,9 +3,27 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
+
+namespace {
+
+// When PIXELFROG_DEMO_XRAY_SECRET is defined: strings are intentionally fake (AWS-style ID, generic API key shape)
+// and exist only so Xray / binary secret detectors have something to match. Never use real credentials here.
+[[maybe_unused]] bool xray_demo_embedded_fake_credentials_touch() {
+#ifdef PIXELFROG_DEMO_XRAY_SECRET
+    static const char kFakeAwsAccessKeyId[] = "AKIAIOSFODNN7EXAMPLE";
+    static const char kFakeApiToken[] =
+        "xray-demo-jf_sk_live_0123456789abcdef0123456789abcdef0123456789";
+    return std::strlen(kFakeAwsAccessKeyId) > 4 && std::strlen(kFakeApiToken) > 8;
+#else
+    return false;
+#endif
+}
+
+} // namespace
 
 int main(int argc, char **argv) {
     pixelfrog::ProcessOptions opt;
@@ -27,6 +45,8 @@ int main(int argc, char **argv) {
     app.add_flag("-v,--verbose", opt.verbose, "Verbose logging");
 
     CLI11_PARSE(app, argc, argv);
+
+    (void)xray_demo_embedded_fake_credentials_touch();
 
     if (!filter_names.empty()) {
         opt.filters = std::move(filter_names);

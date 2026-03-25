@@ -173,6 +173,29 @@ cmake --build --preset conan-release
 
 The recipe currently pins **`spdlog/1.9.2`** in this mode (ConanCenter no longer serves `1.8.0`). Adjust [`conanfile.py`](conanfile.py) if your Artifactory mirrors a different legacy version.
 
+### DEMO_XRAY_SECRET (optional — Xray secret detection in binaries)
+
+**Do not use in production.** When enabled, the **`pixelfrog`** executable contains **fake** credential-shaped literals (AWS-style access key id pattern and a long API-token-shaped string) so tools like **Xray** can exercise **secret / exposed credential** rules on a compiled artifact. They are not real secrets and are documented in source.
+
+1. With Conan (recommended, same as other demo flags):
+
+   ```bash
+   conan install . --build=missing -s build_type=Release -o "&:demo_xray_secret=True"
+   cmake --preset conan-release
+   cmake --build --preset conan-release
+   ```
+
+2. Or CMake only:
+
+   ```bash
+   cmake -S . -B build -DDEMO_XRAY_SECRET=ON
+   cmake --build build
+   ```
+
+   (You still need dependencies installed; the Conan path wires the option through the toolchain.)
+
+You can combine **`-o "&:demo_vuln_mode=True"`** and **`-o "&:demo_xray_secret=True"`** in one `conan install` if you want both behaviors.
+
 ---
 
 ## 7. CI pipeline (`.github/workflows/build.yml`)

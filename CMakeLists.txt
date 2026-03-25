@@ -5,7 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# DEMO_VULN_MODE is set via Conan toolchain when `conan install ... -o "&:demo_vuln_mode=True"`.
+# DEMO_VULN_MODE / DEMO_XRAY_SECRET are set via Conan toolchain (see conanfile.py) or -D on the CMake CLI.
+
+option(DEMO_XRAY_SECRET
+    "Embed fake API-key-shaped literals in the pixelfrog binary for Xray secret-scanning demos only."
+    OFF)
 
 find_package(CLI11 REQUIRED)
 find_package(nlohmann_json REQUIRED)
@@ -30,6 +34,9 @@ target_compile_definitions(pixelfrog_lib PRIVATE
 
 add_executable(pixelfrog src/main.cpp)
 target_link_libraries(pixelfrog PRIVATE pixelfrog_lib CLI11::CLI11)
+if(DEMO_XRAY_SECRET)
+    target_compile_definitions(pixelfrog PRIVATE PIXELFROG_DEMO_XRAY_SECRET)
+endif()
 
 enable_testing()
 find_package(Catch2 3 REQUIRED)

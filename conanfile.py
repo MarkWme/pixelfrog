@@ -8,13 +8,18 @@ class PixelfrogConan(ConanFile):
     version = "1.0.0"
     license = "GPL-3.0-or-later"
     settings = "os", "compiler", "build_type", "arch"
-    options = {"demo_vuln_mode": [True, False]}
-    default_options = {"demo_vuln_mode": False}
+    options = {"demo_vuln_mode": [True, False], "demo_xray_secret": [True, False]}
+    default_options = {"demo_vuln_mode": False, "demo_xray_secret": False}
 
     def configure(self):
         if self.options.demo_vuln_mode:
             self.output.warning(
                 "demo_vuln_mode enabled: using older spdlog for demo CVE visibility only."
+            )
+        if self.options.demo_xray_secret:
+            self.output.warning(
+                "demo_xray_secret enabled: binary will contain fake credential-shaped "
+                "strings for Xray secret detection testing only."
             )
 
     def requirements(self):
@@ -40,6 +45,7 @@ class PixelfrogConan(ConanFile):
         tc = CMakeToolchain(self)
         tc.user_presets_path = False  # use committed [CMakePresets.json](CMakePresets.json)
         tc.variables["DEMO_VULN_MODE"] = "ON" if self.options.demo_vuln_mode else "OFF"
+        tc.variables["DEMO_XRAY_SECRET"] = "ON" if self.options.demo_xray_secret else "OFF"
         tc.generate()
 
     def validate(self):
