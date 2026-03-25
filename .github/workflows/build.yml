@@ -238,6 +238,7 @@ jobs:
           set -euo pipefail
           mkdir -p sarif
           jf scan . --format sarif --fail=false --recursive > sarif/pixelfrog-xray.sarif
+          jf scan . --sbom --format cyclonedx --fail=false --recursive
       - name: Audit conanfile / sources
         continue-on-error: true
         run: |

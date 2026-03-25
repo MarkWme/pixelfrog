@@ -196,6 +196,16 @@ The recipe currently pins **`spdlog/1.9.2`** in this mode (ConanCenter no longer
 
 You can combine **`-o "&:demo_vuln_mode=True"`** and **`-o "&:demo_xray_secret=True"`** in one `conan install` if you want both behaviors.
 
+### Local script (Conan + Build Info + Xray-style scans)
+
+[`scripts/local_jfrog_ci.sh`](scripts/local_jfrog_ci.sh) mirrors the CI **`package-binary`** flow on your machine: configure Conan (**virtual** + **local deploy** remotes), **`jf conan install`** + CMake build, second **`jf conan install` with `--build-name`** (unless using the art path below), optional **`jf conan upload`**, **`jf audit`** / **`jf scan`** (SARIF under **`local-xray-out/`**), **`scripts/ci_write_manifest.py`**, generic **`jf rt upload`**, and **`jf rt build-publish`**. It sets **`JFROG_CLI_BUILD_NAME`/`NUMBER`** like the workflow so Conan modules align with **`JFROG_BUILD_NAME`**.
+
+**Artifactory Build Info via Conan extensions** ([Conan SBOM / Build Info docs](https://docs.conan.io/2/security/sboms.html)): use **`--art-buildinfo`** or **`CONAN_ART_BUILDINFO=1`** in your env file. The script then installs [conan-extensions `art`](https://github.com/conan-io/conan-extensions), **`jf conan upload`**s the cache to your **local** Conan repo (**`--force`** by default so recipe/package binaries such as **`conan_package.tgz`** are actually present under the local repo — otherwise **`conan art:build-info upload`** can return **400** / *item does not exist* on **`set_properties`**), runs **`conan install --format=json`**, **`conan art:build-info create …` with only `CONAN_LOCAL_REPO_KEY`**, and **`conan art:build-info upload`**. **`jf rt build-publish`** still runs afterward to merge **generic** artifacts, env, and git info. Do not pass **`--no-conan-upload`** with **`--art-buildinfo`**. If upload still fails, set **`CONAN_ART_ADD_CACHED_DEPS=0`** in the env file to omit **`--add-cached-deps`**.
+
+1. Copy [`scripts/local_jfrog_ci.env.example`](scripts/local_jfrog_ci.env.example) to **`scripts/local_jfrog_ci.env`** (gitignored) and set **`JF_URL`**, **`JF_ACCESS_TOKEN`**, and **`JF_CONAN_USER`** (Artifactory username for **`conan remote login`**).
+2. Run **`./scripts/local_jfrog_ci.sh`** or **`./scripts/local_jfrog_ci.sh --art-buildinfo`**. Flags: **`--no-publish`** (build + scan only), **`--no-conan-upload`**, **`--no-scan`**, **`-n my-build-id`**, **`-e /path/to.env`**.
+3. Optional: **`jf bs pixelfrog <build-number>`** (or **`jf build-scan`**) after a publish to trigger an Xray build scan.
+
 ---
 
 ## 7. CI pipeline (`.github/workflows/build.yml`)

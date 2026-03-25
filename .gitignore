@@ -4,3 +4,8 @@ CMakeUserPresets.json
 *.swp
 __pycache__/
 *.pyc
+scripts/local_jfrog_ci.env
+local-xray-out/
+staging/
+graph-info.json
+conan-install.json
