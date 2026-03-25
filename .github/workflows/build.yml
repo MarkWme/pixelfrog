@@ -273,6 +273,14 @@ jobs:
         with:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER }}
           oidc-audience: ${{ vars.JF_OIDC_AUDIENCE }}
+      # setup-jfrog-cli sets JFROG_CLI_BUILD_NAME from GITHUB_WORKFLOW (.github/workflows/build.yml → "build").
+      # jf conan then records Conan modules under that name; jf rt build-publish pixelfrog only sees generic uploads.
+      - name: Align JFrog CLI build name/number with publish (JFROG_BUILD_NAME)
+        run: |
+          {
+            echo "JFROG_CLI_BUILD_NAME=${{ env.JFROG_BUILD_NAME }}"
+            echo "JFROG_CLI_BUILD_NUMBER=${{ github.run_number }}"
+          } >> "$GITHUB_ENV"
       - name: Configure Conan remote
         env:
           JF_URL: ${{ vars.JF_URL }}
@@ -304,7 +312,6 @@ jobs:
             -s build_type=Release --build=missing -r jfrog-conan \
             --build-name="${{ env.JFROG_BUILD_NAME }}" \
             --build-number="${{ env.JFROG_BUILD_NUMBER }}" \
-            --module=conan \
             "${EXTRA[@]}"
       # Upload must target a LOCAL Conan repo API URL — virtual returns 400 without "default deployment repository".
       - name: Upload Conan cache to Artifactory (Xray / build SBOM)
