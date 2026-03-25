@@ -145,7 +145,6 @@ conan art:build-info create staging/conan-install.json \
   "$CONAN_LOCAL_REPO_KEY" \
   --server pixelfrog-art \
   --with-dependencies \
-  --add-cached-deps \
   --build-url="$BUILD_URL" \
   > staging/pixelfrog-conan-buildinfo.json
 

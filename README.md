@@ -261,6 +261,7 @@ JFrog Frogbot scans pull requests for vulnerable dependencies. Minimum setup:
 - **Build Info has no Conan dependencies / SBOM shows only generic files:** ensure **`JFROG_CLI_BUILD_NAME`** matches **`JFROG_BUILD_NAME`** before Conan Build Info steps (the workflow sets this after `setup-jfrog-cli`). Confirm **`conan art:build-info upload`** succeeded and **`-r jfrog-conan`** on install. **Xray “Partial”** often improves once Conan modules and indexed repos align; in **Administration → Xray → Indexed Resources**, include your **Conan local**, **Conan remote** (if used), **generic local**, and the **virtual** you use in the UI.
 - **“Partial”** can also appear until Xray finishes asynchronous indexing — refresh the build after a few minutes.
 - Grant **deploy** on **`JF_CONAN_LOCAL_REPO`** (and resolve via **`JF_CONAN_VIRTUAL_REPO`**) so **`jf conan upload`** and **`conan art:build-info`** can complete.
+- **`400` / `set_properties` / `conan_package.tgz` does not exist** on the **local** Conan repo: usually caused by **`conan art:build-info create --add-cached-deps`** referencing packages that were never uploaded there. This workflow uses **`--with-dependencies`** only (install graph), which matches what **`jf conan upload`** deploys.
 - If the Xray SBOM view still looks sparse, open **Build Info → Dependencies** for Conan modules; use the uploaded **`pixelfrog-sbom.cdx.json`** (CycloneDX) in Artifactory for a flat component list when `jf audit` succeeds.
 
 ### Xray scan timeouts

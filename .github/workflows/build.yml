@@ -329,12 +329,13 @@ jobs:
           conan install . --profile:build=default --profile:host=default \
             -s build_type=Release --build=missing -r jfrog-conan \
             --format=json > staging/conan-install.json
+          # Omit --add-cached-deps: it references cache-only refs; art:build-info upload then 400s when
+          # conan_package.tgz was never deployed to the LOCAL repo (e.g. stb header-only edge paths).
           conan art:build-info create staging/conan-install.json \
             "${{ env.JFROG_BUILD_NAME }}" "${{ env.JFROG_BUILD_NUMBER }}" \
             "${{ env.CONAN_LOCAL_REPO_KEY }}" \
             --server pixelfrog-art \
             --with-dependencies \
-            --add-cached-deps \
             --build-url="${BUILD_URL}" \
             > staging/pixelfrog-conan-buildinfo.json
           UPLOAD=( --server pixelfrog-art )
